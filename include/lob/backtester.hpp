@@ -35,12 +35,18 @@ public:
     Backtester() : Backtester(Config{}) {}
     explicit Backtester(Config config)
         : config_(config) {
+        engine_ = std::make_unique<MatchingEngine>();
+    }
+
+    void add_instrument(InstrumentId inst_id) {
+        std::unique_ptr<IOrderBook> book;
         if (config_.use_flat_book) {
-            book_ = std::make_unique<FlatArrayOrderBook>(config_.max_price);
+            book = std::make_unique<FlatArrayOrderBook>(config_.max_price);
         } else {
-            book_ = std::make_unique<MapOrderBook>();
+            book = std::make_unique<MapOrderBook>();
         }
-        engine_ = std::make_unique<MatchingEngine>(std::move(book_));
+        engine_->add_instrument(inst_id, std::move(book));
+        instruments_.push_back(inst_id);
     }
 
     void set_strategy(std::shared_ptr<Strategy> strategy) {
@@ -62,8 +68,14 @@ public:
         });
 
         MarketEvent event;
+        std::unordered_map<InstrumentId, bool> known_instruments;
         while (reader.read_next(event)) {
             current_timestamp_ = event.timestamp;
+
+            if (LOB_UNLIKELY(!known_instruments[event.inst_id])) {
+                add_instrument(event.inst_id);
+                known_instruments[event.inst_id] = true;
+            }
 
             // 1. Process any inflight strategy actions whose simulated latency has elapsed
             process_pending_actions_up_to(current_timestamp_);
@@ -71,15 +83,19 @@ public:
             // 2. Process incoming market event in the matching engine
             engine_->process_event(event);
 
-            // 3. Mark PnL to market if valid mid/best exists
-            Price mid = get_mid_price();
+            // 3. Mark PnL to market if valid mid/best exists for this instrument
+            Price mid = get_mid_price(event.inst_id);
             if (mid != INVALID_PRICE) {
+                // To support per-instrument PnL we'd pass inst_id, but for now we aggregate
                 pnl_tracker_.mark_to_market(mid, current_timestamp_);
             }
 
             // 4. Notify strategy of book update
             if (strategy_) {
-                strategy_->on_order_book_update(engine_->book(), current_timestamp_);
+                const auto* book = engine_->get_book(event.inst_id);
+                if (book) {
+                    strategy_->on_order_book_update(event.inst_id, *book, current_timestamp_);
+                }
             }
         }
 
@@ -90,9 +106,12 @@ public:
     [[nodiscard]] const PnLTracker& pnl_tracker() const noexcept { return pnl_tracker_; }
     [[nodiscard]] const MatchingEngine& engine() const noexcept { return *engine_; }
 
-    [[nodiscard]] Price get_mid_price() const noexcept {
-        Price bb = engine_->book().get_best_bid();
-        Price ba = engine_->book().get_best_ask();
+    [[nodiscard]] Price get_mid_price(InstrumentId inst_id) const noexcept {
+        const auto* book = engine_->get_book(inst_id);
+        if (!book) return INVALID_PRICE;
+
+        Price bb = book->get_best_bid();
+        Price ba = book->get_best_ask();
         if (bb != INVALID_PRICE && ba != INVALID_PRICE) {
             return (bb + ba) / 2;
         }
@@ -117,7 +136,7 @@ private:
 
     void execute_strategy_action(const StrategyAction& action, Timestamp exec_ts) {
         if (action.type == StrategyAction::ActionType::CancelOrder) {
-            engine_->cancel_order(action.order_id);
+            engine_->cancel_order(action.inst_id, action.order_id);
             active_strategy_orders_.erase(action.order_id);
             return;
         }
@@ -126,31 +145,33 @@ private:
         // Match against current book
         Qty remaining = action.qty;
         Price fill_price = INVALID_PRICE;
+        auto* book = engine_->get_book(action.inst_id);
+        if (!book) return;
 
         if (action.side == Side::Buy) {
-            Price best_ask = engine_->book().get_best_ask();
+            Price best_ask = book->get_best_ask();
             if (best_ask != INVALID_PRICE && action.price >= best_ask) {
                 // Aggressive crossing fill
-                Qty filled = engine_->process_market_order(action.order_id, Side::Buy, action.qty, exec_ts);
+                Qty filled = engine_->process_market_order(action.inst_id, action.order_id, Side::Buy, action.qty, exec_ts);
                 fill_price = best_ask;
                 if (filled > 0) {
                     pnl_tracker_.on_fill(Side::Buy, fill_price, filled, exec_ts);
                     if (strategy_) {
-                        strategy_->on_fill(FillEvent{action.order_id, fill_price, filled, Side::Buy, exec_ts, false});
+                        strategy_->on_fill(FillEvent{action.inst_id, action.order_id, fill_price, filled, Side::Buy, exec_ts, false});
                     }
                 }
                 remaining -= filled;
             }
         } else {
-            Price best_bid = engine_->book().get_best_bid();
+            Price best_bid = book->get_best_bid();
             if (best_bid != INVALID_PRICE && action.price <= best_bid) {
                 // Aggressive crossing fill
-                Qty filled = engine_->process_market_order(action.order_id, Side::Sell, action.qty, exec_ts);
+                Qty filled = engine_->process_market_order(action.inst_id, action.order_id, Side::Sell, action.qty, exec_ts);
                 fill_price = best_bid;
                 if (filled > 0) {
                     pnl_tracker_.on_fill(Side::Sell, fill_price, filled, exec_ts);
                     if (strategy_) {
-                        strategy_->on_fill(FillEvent{action.order_id, fill_price, filled, Side::Sell, exec_ts, false});
+                        strategy_->on_fill(FillEvent{action.inst_id, action.order_id, fill_price, filled, Side::Sell, exec_ts, false});
                     }
                 }
                 remaining -= filled;
@@ -159,14 +180,14 @@ private:
 
         // Rest unfilled portion on the book
         if (remaining > 0) {
-            engine_->book().add_order(action.order_id, action.side, action.price, remaining, exec_ts);
+            book->add_order(action.order_id, action.side, action.price, remaining, exec_ts);
             active_strategy_orders_[action.order_id] = action;
         }
     }
 
     Config config_;
-    std::unique_ptr<IOrderBook> book_;
     std::unique_ptr<MatchingEngine> engine_;
+    std::vector<InstrumentId> instruments_;
     std::shared_ptr<Strategy> strategy_;
     std::priority_queue<PendingAction, std::vector<PendingAction>, std::greater<PendingAction>> pending_actions_;
     std::unordered_map<OrderId, StrategyAction> active_strategy_orders_;

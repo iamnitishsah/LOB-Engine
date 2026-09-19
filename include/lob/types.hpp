@@ -13,11 +13,13 @@ using Price = uint32_t;
 using Qty = uint32_t;
 using OrderId = uint64_t;
 using Timestamp = uint64_t; // Nanoseconds
+using InstrumentId = uint32_t;
 
 constexpr Price INVALID_PRICE = 0;
 constexpr Price MIN_PRICE = 1;
 constexpr Price MAX_PRICE = 1000000;
 constexpr OrderId INVALID_ORDER_ID = 0;
+constexpr InstrumentId INVALID_INSTRUMENT = 0;
 constexpr Qty ZERO_QTY = 0;
 
 enum class Side : uint8_t {
@@ -61,6 +63,7 @@ struct PriceLevel;
 // Intrusive Doubly Linked List Order Node
 struct alignas(64) Order {
     OrderId id{INVALID_ORDER_ID};
+    InstrumentId inst_id{INVALID_INSTRUMENT};
     Price price{INVALID_PRICE};
     Qty qty{ZERO_QTY};
     Side side{Side::Buy};
@@ -74,6 +77,7 @@ struct alignas(64) Order {
 
     void reset() noexcept {
         id = INVALID_ORDER_ID;
+        inst_id = INVALID_INSTRUMENT;
         price = INVALID_PRICE;
         qty = ZERO_QTY;
         side = Side::Buy;
@@ -140,6 +144,7 @@ struct PriceLevel {
 
 // Trade execution event
 struct TradeEvent {
+    InstrumentId inst_id{INVALID_INSTRUMENT};
     OrderId maker_order_id{INVALID_ORDER_ID};
     OrderId taker_order_id{INVALID_ORDER_ID};
     Price price{INVALID_PRICE};
@@ -150,6 +155,7 @@ struct TradeEvent {
 
 // Strategy fill event
 struct FillEvent {
+    InstrumentId inst_id{INVALID_INSTRUMENT};
     OrderId order_id{INVALID_ORDER_ID};
     Price price{INVALID_PRICE};
     Qty qty{ZERO_QTY};
@@ -172,7 +178,7 @@ struct MarketEventRecord {
     uint8_t event_type{0}; // EventType
     uint8_t side{0};       // Side
     uint16_t reserved1{0};
-    uint32_t reserved2{0}; // Padding to ensure 32-byte aligned record
+    uint32_t inst_id{0};   // Instrument ID replacing reserved2
     uint32_t price{0};     // Ticks
     uint32_t qty{0};
     uint64_t order_id{0};
@@ -186,6 +192,7 @@ static_assert(sizeof(MarketEventRecord) == 32, "MarketEventRecord must be exactl
 struct MarketEvent {
     EventType type{EventType::Add};
     Side side{Side::Buy};
+    InstrumentId inst_id{INVALID_INSTRUMENT};
     OrderId order_id{INVALID_ORDER_ID};
     Price price{INVALID_PRICE};
     Qty qty{ZERO_QTY};
@@ -196,7 +203,7 @@ struct MarketEvent {
         rec.event_type = static_cast<uint8_t>(type);
         rec.side = static_cast<uint8_t>(side);
         rec.reserved1 = 0;
-        rec.reserved2 = 0;
+        rec.inst_id = inst_id;
         rec.price = price;
         rec.qty = qty;
         rec.order_id = order_id;
@@ -208,6 +215,7 @@ struct MarketEvent {
         MarketEvent ev;
         ev.type = static_cast<EventType>(rec.event_type);
         ev.side = static_cast<Side>(rec.side);
+        ev.inst_id = rec.inst_id;
         ev.order_id = rec.order_id;
         ev.price = rec.price;
         ev.qty = rec.qty;

@@ -23,18 +23,25 @@ public:
     }
 
     void init() override;
-    void on_order_book_update(const IOrderBook& book, Timestamp ts) override;
+    void on_order_book_update(InstrumentId inst_id, const IOrderBook& book, Timestamp ts) override;
     void on_trade(const TradeEvent& trade) override;
     void on_fill(const FillEvent& fill) override;
 
-    [[nodiscard]] int64_t inventory() const noexcept { return inventory_; }
+    [[nodiscard]] int64_t inventory(InstrumentId inst_id) const noexcept { 
+        auto it = states_.find(inst_id);
+        return it != states_.end() ? it->second.inventory : 0; 
+    }
 
 private:
+    struct State {
+        int64_t inventory{0};
+        OrderId next_order_id{3000000000ULL};
+        std::deque<Price> recent_mids;
+        double flow_imbalance{0.0};
+    };
+
     Config config_;
-    int64_t inventory_{0};
-    OrderId next_order_id_{3000000000ULL};
-    std::deque<Price> recent_mids_;
-    double flow_imbalance_{0.0};
+    std::unordered_map<InstrumentId, State> states_;
 };
 
 } // namespace lob

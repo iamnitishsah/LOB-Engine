@@ -10,14 +10,10 @@ MarketMakerStrategy::MarketMakerStrategy(Config config)
     : config_(config) {}
 
 void MarketMakerStrategy::init() {
-    inventory_ = 0;
-    has_active_bid_ = false;
-    has_active_ask_ = false;
-    last_quoted_bid_ = INVALID_PRICE;
-    last_quoted_ask_ = INVALID_PRICE;
+    states_.clear();
 }
 
-void MarketMakerStrategy::on_order_book_update(const IOrderBook& book, Timestamp ts) {
+void MarketMakerStrategy::on_order_book_update(InstrumentId inst_id, const IOrderBook& book, Timestamp ts) {
     Price bb = book.get_best_bid();
     Price ba = book.get_best_ask();
 
@@ -25,8 +21,16 @@ void MarketMakerStrategy::on_order_book_update(const IOrderBook& book, Timestamp
         return;
     }
 
+    auto& state = states_[inst_id];
+    // Initialize base IDs based on instrument to avoid overlap across instruments,
+    // though in backtest OrderId is unique if we just increment.
+    if (state.current_bid_id == 1000000000ULL) {
+        state.current_bid_id = 1000000000ULL + inst_id * 1000000ULL;
+        state.current_ask_id = 2000000000ULL + inst_id * 1000000ULL;
+    }
+
     Price mid = (bb + ba) / 2;
-    int32_t skew_ticks = static_cast<int32_t>(std::round(static_cast<double>(inventory_) * config_.inventory_skew_factor));
+    int32_t skew_ticks = static_cast<int32_t>(std::round(static_cast<double>(state.inventory) * config_.inventory_skew_factor));
 
     Price target_bid = (mid > config_.half_spread + skew_ticks) ? (mid - config_.half_spread - skew_ticks) : 1;
     Price target_ask = mid + config_.half_spread - skew_ticks;
@@ -35,35 +39,35 @@ void MarketMakerStrategy::on_order_book_update(const IOrderBook& book, Timestamp
     }
 
     // Bid quote management
-    if (inventory_ < config_.max_inventory) {
-        if (!has_active_bid_ || target_bid != last_quoted_bid_) {
-            if (has_active_bid_) {
-                cancel_order(current_bid_id_, ts);
-                ++current_bid_id_;
+    if (state.inventory < config_.max_inventory) {
+        if (!state.has_active_bid || target_bid != state.last_quoted_bid) {
+            if (state.has_active_bid) {
+                cancel_order(inst_id, state.current_bid_id, ts);
+                ++state.current_bid_id;
             }
-            send_order(current_bid_id_, Side::Buy, target_bid, config_.quote_qty, ts);
-            last_quoted_bid_ = target_bid;
-            has_active_bid_ = true;
+            send_order(inst_id, state.current_bid_id, Side::Buy, target_bid, config_.quote_qty, ts);
+            state.last_quoted_bid = target_bid;
+            state.has_active_bid = true;
         }
-    } else if (has_active_bid_) {
-        cancel_order(current_bid_id_, ts);
-        has_active_bid_ = false;
+    } else if (state.has_active_bid) {
+        cancel_order(inst_id, state.current_bid_id, ts);
+        state.has_active_bid = false;
     }
 
     // Ask quote management
-    if (inventory_ > -config_.max_inventory) {
-        if (!has_active_ask_ || target_ask != last_quoted_ask_) {
-            if (has_active_ask_) {
-                cancel_order(current_ask_id_, ts);
-                ++current_ask_id_;
+    if (state.inventory > -config_.max_inventory) {
+        if (!state.has_active_ask || target_ask != state.last_quoted_ask) {
+            if (state.has_active_ask) {
+                cancel_order(inst_id, state.current_ask_id, ts);
+                ++state.current_ask_id;
             }
-            send_order(current_ask_id_, Side::Sell, target_ask, config_.quote_qty, ts);
-            last_quoted_ask_ = target_ask;
-            has_active_ask_ = true;
+            send_order(inst_id, state.current_ask_id, Side::Sell, target_ask, config_.quote_qty, ts);
+            state.last_quoted_ask = target_ask;
+            state.has_active_ask = true;
         }
-    } else if (has_active_ask_) {
-        cancel_order(current_ask_id_, ts);
-        has_active_ask_ = false;
+    } else if (state.has_active_ask) {
+        cancel_order(inst_id, state.current_ask_id, ts);
+        state.has_active_ask = false;
     }
 }
 
@@ -72,15 +76,16 @@ void MarketMakerStrategy::on_trade(const TradeEvent& /*trade*/) {
 }
 
 void MarketMakerStrategy::on_fill(const FillEvent& fill) {
+    auto& state = states_[fill.inst_id];
     if (fill.side == Side::Buy) {
-        inventory_ += fill.qty;
-        if (fill.order_id == current_bid_id_) {
-            has_active_bid_ = false;
+        state.inventory += fill.qty;
+        if (fill.order_id == state.current_bid_id) {
+            state.has_active_bid = false;
         }
     } else {
-        inventory_ -= fill.qty;
-        if (fill.order_id == current_ask_id_) {
-            has_active_ask_ = false;
+        state.inventory -= fill.qty;
+        if (fill.order_id == state.current_ask_id) {
+            state.has_active_ask = false;
         }
     }
 }

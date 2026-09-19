@@ -6,6 +6,7 @@
 #include <string>
 #include <memory>
 #include <chrono>
+#include <unordered_map>
 
 struct ReplayOptions {
     std::string input_path{"data/feed.bin"};
@@ -51,14 +52,8 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Replaying " << opts.input_path << " using impl=" << opts.impl << "...\n";
 
-    std::unique_ptr<lob::IOrderBook> book;
-    if (opts.impl == "map") {
-        book = std::make_unique<lob::MapOrderBook>();
-    } else {
-        book = std::make_unique<lob::FlatArrayOrderBook>();
-    }
-
-    lob::MatchingEngine engine(std::move(book));
+    lob::MatchingEngine engine;
+    std::unordered_map<lob::InstrumentId, bool> known_books;
     lob::LatencyStats latency_stats;
 
     lob::MarketEvent ev;
@@ -66,6 +61,17 @@ int main(int argc, char* argv[]) {
 
     size_t event_count = 0;
     while (reader.read_next(ev)) {
+        if (LOB_UNLIKELY(!known_books[ev.inst_id])) {
+            std::unique_ptr<lob::IOrderBook> book;
+            if (opts.impl == "map") {
+                book = std::make_unique<lob::MapOrderBook>();
+            } else {
+                book = std::make_unique<lob::FlatArrayOrderBook>();
+            }
+            engine.add_instrument(ev.inst_id, std::move(book));
+            known_books[ev.inst_id] = true;
+        }
+
         uint64_t t0 = lob::Timer::now_ns();
         engine.process_event(ev);
         uint64_t t1 = lob::Timer::now_ns();
@@ -83,20 +89,31 @@ int main(int argc, char* argv[]) {
               << "  Total wall time:  " << total_sec << " s\n"
               << "  Throughput:       " << events_per_sec / 1e6 << " M events/sec\n"
               << "  Total Trades:     " << engine.total_trades() << "\n"
-              << "  Total Volume:     " << engine.total_volume() << "\n"
-              << "  Live Orders:      " << engine.book().order_count() << "\n"
-              << "  Best Bid:         " << engine.book().get_best_bid() << "\n"
-              << "  Best Ask:         " << engine.book().get_best_ask() << "\n\n";
+              << "  Total Volume:     " << engine.total_volume() << "\n";
+
+    for (const auto& [inst_id, _] : known_books) {
+        const auto* book = engine.get_book(inst_id);
+        std::cout << "  Inst ID: " << inst_id << "\n"
+                  << "    Live Orders:      " << book->order_count() << "\n"
+                  << "    Best Bid:         " << book->get_best_bid() << "\n"
+                  << "    Best Ask:         " << book->get_best_ask() << "\n";
+    }
+    std::cout << "\n";
 
     latency_stats.print_summary(std::cout, "Event Processing Latency");
 
     if (opts.verify_invariants) {
-        std::string err;
-        bool valid = engine.book().verify_invariants(&err);
-        if (valid) {
+        bool all_valid = true;
+        for (const auto& [inst_id, _] : known_books) {
+            std::string err;
+            if (!engine.get_book(inst_id)->verify_invariants(&err)) {
+                std::cerr << "[FAIL] Order book invariant check failed for Inst " << inst_id << ": " << err << "\n";
+                all_valid = false;
+            }
+        }
+        if (all_valid) {
             std::cout << "[PASS] Order book invariants verified successfully!\n";
         } else {
-            std::cerr << "[FAIL] Order book invariant check failed: " << err << "\n";
             return 2;
         }
     }

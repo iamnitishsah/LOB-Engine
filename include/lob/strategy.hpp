@@ -16,6 +16,7 @@ struct StrategyAction {
     };
 
     ActionType type{ActionType::SendOrder};
+    InstrumentId inst_id{INVALID_INSTRUMENT};
     OrderId order_id{INVALID_ORDER_ID};
     Side side{Side::Buy};
     Price price{INVALID_PRICE};
@@ -32,7 +33,7 @@ public:
     virtual void init() {}
 
     // Market data event callbacks
-    virtual void on_order_book_update(const IOrderBook& book, Timestamp ts) = 0;
+    virtual void on_order_book_update(InstrumentId inst_id, const IOrderBook& book, Timestamp ts) = 0;
     virtual void on_trade(const TradeEvent& trade) = 0;
 
     // Execution callback
@@ -44,15 +45,15 @@ public:
     }
 
 protected:
-    void send_order(OrderId id, Side side, Price price, Qty qty, Timestamp ts) {
+    void send_order(InstrumentId inst_id, OrderId id, Side side, Price price, Qty qty, Timestamp ts) {
         if (action_handler_) {
-            action_handler_(StrategyAction{StrategyAction::ActionType::SendOrder, id, side, price, qty, ts});
+            action_handler_(StrategyAction{StrategyAction::ActionType::SendOrder, inst_id, id, side, price, qty, ts});
         }
     }
 
-    void cancel_order(OrderId id, Timestamp ts) {
+    void cancel_order(InstrumentId inst_id, OrderId id, Timestamp ts) {
         if (action_handler_) {
-            action_handler_(StrategyAction{StrategyAction::ActionType::CancelOrder, id, Side::Buy, INVALID_PRICE, ZERO_QTY, ts});
+            action_handler_(StrategyAction{StrategyAction::ActionType::CancelOrder, inst_id, id, Side::Buy, INVALID_PRICE, ZERO_QTY, ts});
         }
     }
 

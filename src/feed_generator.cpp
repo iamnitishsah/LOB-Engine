@@ -5,6 +5,7 @@
 #include <string>
 #include <filesystem>
 #include <algorithm>
+#include <unordered_map>
 
 struct GeneratorOptions {
     uint64_t events{100000};
@@ -14,6 +15,7 @@ struct GeneratorOptions {
     double cancel_ratio{0.35};
     double market_order_ratio{0.10};
     double modify_ratio{0.05};
+    uint32_t num_instruments{1};
 };
 
 void print_usage(const char* prog) {
@@ -24,6 +26,7 @@ void print_usage(const char* prog) {
               << "  --out <path>        Output binary file path (default: data/feed.bin)\n"
               << "  --initial-price <P> Initial price in ticks (default: 10000)\n"
               << "  --cancel-ratio <R>  Probability of cancel events (default: 0.35)\n"
+              << "  --num-instruments <N> Number of instruments to generate (default: 1)\n"
               << "  --help              Display this message\n";
 }
 
@@ -42,13 +45,15 @@ int main(int argc, char* argv[]) {
             opts.initial_price = static_cast<lob::Price>(std::stoul(argv[++i]));
         } else if (arg == "--cancel-ratio" && i + 1 < argc) {
             opts.cancel_ratio = std::stod(argv[++i]);
+        } else if (arg == "--num-instruments" && i + 1 < argc) {
+            opts.num_instruments = std::stoul(argv[++i]);
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
         }
     }
 
-    std::cout << "Generating " << opts.events << " events (seed=" << opts.seed << ") to " << opts.out_path << "...\n";
+    std::cout << "Generating " << opts.events << " events (seed=" << opts.seed << ", instruments=" << opts.num_instruments << ") to " << opts.out_path << "...\n";
 
     // Ensure output directory exists
     std::filesystem::path p(opts.out_path);
@@ -67,12 +72,14 @@ int main(int argc, char* argv[]) {
     std::normal_distribution<double> price_diff_dist(0.0, 2.0);
     std::uniform_int_distribution<lob::Qty> qty_dist(1, 100);
     std::uniform_int_distribution<uint64_t> dt_dist(100, 5000); // 100ns to 5us
+    std::uniform_int_distribution<uint32_t> inst_dist(1, opts.num_instruments);
 
     struct ActiveOrderInfo {
         lob::OrderId id;
         lob::Side side;
         lob::Price price;
         lob::Qty qty;
+        lob::InstrumentId inst_id;
     };
 
     std::vector<ActiveOrderInfo> active_orders;
@@ -80,17 +87,22 @@ int main(int argc, char* argv[]) {
 
     lob::OrderId next_order_id = 1;
     lob::Timestamp current_ts = 1700000000000000000ULL; // Simulation start
-    lob::Price current_mid = opts.initial_price;
+    std::unordered_map<lob::InstrumentId, lob::Price> current_mids;
+    for (uint32_t i = 1; i <= opts.num_instruments; ++i) {
+        current_mids[i] = opts.initial_price;
+    }
 
     for (uint64_t i = 0; i < opts.events; ++i) {
         current_ts += dt_dist(rng);
         double roll = uniform_dist(rng);
 
+        lob::InstrumentId inst_id = inst_dist(rng);
+
         // Periodically drift mid-price slightly
         if (i % 50 == 0) {
             int delta = static_cast<int>(std::round(price_diff_dist(rng)));
-            if (static_cast<int>(current_mid) + delta > 100) {
-                current_mid += delta;
+            if (static_cast<int>(current_mids[inst_id]) + delta > 100) {
+                current_mids[inst_id] += delta;
             }
         }
 
@@ -108,6 +120,7 @@ int main(int argc, char* argv[]) {
             ev.price = target.price;
             ev.qty = target.qty;
             ev.timestamp = current_ts;
+            ev.inst_id = target.inst_id;
             writer.write_event(ev);
         } else if (roll < (opts.cancel_ratio + opts.modify_ratio) && !active_orders.empty()) {
             // Modify event
@@ -123,6 +136,7 @@ int main(int argc, char* argv[]) {
             ev.price = target.price;
             ev.qty = new_qty;
             ev.timestamp = current_ts;
+            ev.inst_id = target.inst_id;
             writer.write_event(ev);
         } else if (roll < (opts.cancel_ratio + opts.modify_ratio + opts.market_order_ratio)) {
             // Market / Execute order
@@ -134,17 +148,18 @@ int main(int argc, char* argv[]) {
             ev.price = 0; // Market order has no limit price
             ev.qty = qty_dist(rng);
             ev.timestamp = current_ts;
+            ev.inst_id = inst_id;
             writer.write_event(ev);
         } else {
             // Add Limit Order
             lob::Side side = (uniform_dist(rng) < 0.5) ? lob::Side::Buy : lob::Side::Sell;
             int offset = std::uniform_int_distribution<int>(1, 20)(rng);
-            lob::Price price = (side == lob::Side::Buy) ? (current_mid - offset) : (current_mid + offset);
+            lob::Price price = (side == lob::Side::Buy) ? (current_mids[inst_id] - offset) : (current_mids[inst_id] + offset);
             if (price < 1) price = 1;
             lob::Qty qty = qty_dist(rng);
             lob::OrderId id = next_order_id++;
 
-            active_orders.push_back({id, side, price, qty});
+            active_orders.push_back({id, side, price, qty, inst_id});
 
             lob::MarketEvent ev;
             ev.type = lob::EventType::Add;
@@ -153,6 +168,7 @@ int main(int argc, char* argv[]) {
             ev.price = price;
             ev.qty = qty;
             ev.timestamp = current_ts;
+            ev.inst_id = inst_id;
             writer.write_event(ev);
         }
     }

@@ -42,14 +42,14 @@ static std::vector<lob::MarketEvent> generate_test_events(uint64_t seed, size_t 
             lob::OrderId target = active[idx];
             active[idx] = active.back();
             active.pop_back();
-            events.push_back(lob::MarketEvent{lob::EventType::Cancel, lob::Side::Buy, target, 0, 0, ts});
+            events.push_back(lob::MarketEvent{lob::EventType::Cancel, lob::Side::Buy, 0, target, 0, 0, ts});
         } else {
             lob::OrderId id = next_id++;
             lob::Side side = (roll(rng) < 0.5) ? lob::Side::Buy : lob::Side::Sell;
             lob::Price price = price_dist(rng);
             lob::Qty qty = qty_dist(rng);
             active.push_back(id);
-            events.push_back(lob::MarketEvent{lob::EventType::Add, side, id, price, qty, ts});
+            events.push_back(lob::MarketEvent{lob::EventType::Add, side, 0, id, price, qty, ts});
         }
     }
     return events;
@@ -63,7 +63,9 @@ static ExecutionHash run_simulation(const std::vector<lob::MarketEvent>& events,
         book = std::make_unique<lob::MapOrderBook>();
     }
 
-    lob::MatchingEngine engine(std::move(book));
+    lob::MatchingEngine engine;
+    // Assume all test events use instrument 1 or INVALID_INSTRUMENT=0, let's just use 0 as default in events generated.
+    engine.add_instrument(0, std::move(book));
     ExecutionHash hash;
 
     engine.set_trade_callback([&hash](const lob::TradeEvent& trade) {
@@ -76,9 +78,9 @@ static ExecutionHash run_simulation(const std::vector<lob::MarketEvent>& events,
         engine.process_event(ev);
     }
 
-    hash.final_order_count = engine.book().order_count();
-    hash.final_best_bid = engine.book().get_best_bid();
-    hash.final_best_ask = engine.book().get_best_ask();
+    hash.final_order_count = engine.get_book(0)->order_count();
+    hash.final_best_bid = engine.get_book(0)->get_best_bid();
+    hash.final_best_ask = engine.get_book(0)->get_best_ask();
     return hash;
 }
 
