@@ -39,6 +39,26 @@ Trading systems are judged by how predictably fast they process events. This pro
 - **Two sample strategies**:
   - Market making
   - Momentum / mean reversion
+
+## Core Components
+
+- **IOrderBook**: Interface for Order Book operations.
+- **MapOrderBook**: Implementation utilizing `std::map` (O(log N) operations).
+- **FlatArrayOrderBook**: Implementation utilizing flat contiguous arrays for specific price ticks (O(1) lookups).
+- **MatchingEngine**: Central processor receiving MarketEvents and updating OrderBooks per Instrument ID.
+- **FeedReader**: Reads binary data containing realistic LOB event formats.
+- **Strategy**: Interface for algorithmic trading agents hooked into the matching engine.
+- **PnLTracker**: Records realized / unrealized PnL, open positions, and drawdowns.
+
+## Implemented Features
+- [x] Initial Project Skeleton
+- [x] High-performance baseline metrics and `google/benchmark` suite.
+- [x] Multi-instrument support: Capable of tracking multiple independent order books in the matching engine seamlessly.
+
+## Step 2: Multi-instrument Support Completed
+The `MatchingEngine` now manages a `std::unordered_map<InstrumentId, std::unique_ptr<IOrderBook>>`. Strategies (`Momentum` and `MarketMaker`) were updated to handle state internally per-instrument ID. 
+`run_backtest` and `run_replay` have been modified to natively ingest multi-instrument order books and report live metrics on a per-instrument basis.
+
 - **Micro-benchmarks** using Google Benchmark
 - **Latency statistics** including p50, p99, and p99.9
 - **Python analysis tooling** for latency distributions and PnL curves
