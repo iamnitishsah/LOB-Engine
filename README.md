@@ -66,6 +66,9 @@ Introduced a high-throughput lock-free Single-Producer Single-Consumer (SPSC) qu
 ## Step 4: Real-world Market Data (ITCH-5.0 Parsing) Completed
 Implemented a zero-allocation, `#pragma pack(1)` NASDAQ ITCH 5.0 binary protocol parser (`include/lob/itch_parser.hpp`). Built an `itch_converter` tool that seamlessly transcodes standard real-world ITCH data (Add, Execute, Cancel, Delete, Replace) into our highly-optimized 32-byte `feed.bin` architecture. All data undergoes automatic big-endian to native-endian conversion utilizing fast CPU built-in bswaps.
 
+## Step 5: Backtesting Realism (Queue Position Model) Completed
+Integrated passive strategy order execution seamlessly inside the historical L3 Matching Engine. Instead of utilizing external queue position trackers, strategy orders are injected into the real historical queues at the correct timestamp. Historical sweeps deterministically execute through real orders before natively triggering Strategy fills. The backtesting engine securely intercepts and routes these passive gateway fills directly to Strategy `PnL` profiles without namespace collisions.
+
 - **Micro-benchmarks** using Google Benchmark
 - **Latency statistics** including p50, p99, and p99.9
 - **Python analysis tooling** for latency distributions and PnL curves

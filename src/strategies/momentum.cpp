@@ -22,7 +22,7 @@ void MomentumStrategy::on_order_book_update(InstrumentId inst_id, const IOrderBo
 
     auto& state = states_[inst_id];
     if (state.next_order_id == 3000000000ULL) {
-        state.next_order_id = 3000000000ULL + inst_id * 1000000ULL;
+        state.next_order_id = (1ULL << 62) + inst_id * 1000000ULL;
     }
 
     state.recent_mids.push_back(mid);

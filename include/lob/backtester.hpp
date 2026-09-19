@@ -61,9 +61,24 @@ public:
 
     void run(BinaryFeedReader& reader) {
         engine_->set_trade_callback([this](const TradeEvent& trade) {
-            // Forward market trades to strategy
-            if (strategy_) {
-                strategy_->on_trade(trade);
+            // Check if the resting maker order belongs to our strategy
+            auto it = active_strategy_orders_.find(trade.maker_order_id);
+            if (it != active_strategy_orders_.end()) {
+                // Passive fill for strategy
+                pnl_tracker_.on_fill(it->second.side, trade.price, trade.qty, trade.timestamp);
+                if (strategy_) {
+                    strategy_->on_fill(FillEvent{trade.inst_id, trade.maker_order_id, trade.price, trade.qty, it->second.side, trade.timestamp, true});
+                }
+                
+                it->second.qty -= trade.qty;
+                if (it->second.qty == 0) {
+                    active_strategy_orders_.erase(it);
+                }
+            } else {
+                // Normal market trade
+                if (strategy_) {
+                    strategy_->on_trade(trade);
+                }
             }
         });
 

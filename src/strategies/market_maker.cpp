@@ -25,8 +25,8 @@ void MarketMakerStrategy::on_order_book_update(InstrumentId inst_id, const IOrde
     // Initialize base IDs based on instrument to avoid overlap across instruments,
     // though in backtest OrderId is unique if we just increment.
     if (state.current_bid_id == 1000000000ULL) {
-        state.current_bid_id = 1000000000ULL + inst_id * 1000000ULL;
-        state.current_ask_id = 2000000000ULL + inst_id * 1000000ULL;
+        state.current_bid_id = (1ULL << 62) + inst_id * 1000000ULL;
+        state.current_ask_id = (1ULL << 63) + inst_id * 1000000ULL;
     }
 
     Price mid = (bb + ba) / 2;
