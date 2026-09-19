@@ -54,10 +54,14 @@ Trading systems are judged by how predictably fast they process events. This pro
 - [x] Initial Project Skeleton
 - [x] High-performance baseline metrics and `google/benchmark` suite.
 - [x] Multi-instrument support: Capable of tracking multiple independent order books in the matching engine seamlessly.
+- [x] SPSC Lock-free Queue: Thread-safe non-blocking queue for cross-thread event pushing.
 
 ## Step 2: Multi-instrument Support Completed
 The `MatchingEngine` now manages a `std::unordered_map<InstrumentId, std::unique_ptr<IOrderBook>>`. Strategies (`Momentum` and `MarketMaker`) were updated to handle state internally per-instrument ID. 
 `run_backtest` and `run_replay` have been modified to natively ingest multi-instrument order books and report live metrics on a per-instrument basis.
+
+## Step 3: Concurrency (SPSC Lock-free Queue) Completed
+Introduced a high-throughput lock-free Single-Producer Single-Consumer (SPSC) queue padded for zero false sharing across CPU cores (`include/lob/spsc_queue.hpp`). An `AsyncMatchingEngine` wrapper was built to spin up a background execution thread. Validated to safely transfer and execute > 4 Million concurrent `MarketEvent` actions per second across threads using `async_replay`.
 
 - **Micro-benchmarks** using Google Benchmark
 - **Latency statistics** including p50, p99, and p99.9

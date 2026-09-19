@@ -33,6 +33,9 @@ add_executable(feed_generator src/feed_generator.cpp)
 target_link_libraries(feed_generator PRIVATE lob_core)
 
 add_executable(replay src/main_replay.cpp)
+add_executable(async_replay src/main_async_replay.cpp)
+target_link_libraries(async_replay PRIVATE lob_core)
+
 target_link_libraries(replay PRIVATE lob_core)
 
 add_executable(backtest src/main_backtest.cpp)
@@ -69,6 +72,10 @@ add_test(NAME test_order_book COMMAND test_order_book)
 add_executable(test_matching tests/test_matching.cpp)
 target_link_libraries(test_matching PRIVATE lob_core GTest::gtest_main)
 add_test(NAME test_matching COMMAND test_matching)
+add_executable(test_spsc_queue tests/test_spsc_queue.cpp)
+target_link_libraries(test_spsc_queue PRIVATE lob_core GTest::gtest_main)
+add_test(NAME test_spsc_queue COMMAND test_spsc_queue)
+
 
 add_executable(test_replay_determinism tests/test_replay_determinism.cpp)
 target_link_libraries(test_replay_determinism PRIVATE lob_core GTest::gtest_main)
@@ -80,6 +87,9 @@ target_link_libraries(bench_add_cancel PRIVATE lob_core benchmark::benchmark)
 
 add_executable(bench_match bench/bench_match.cpp)
 target_link_libraries(bench_match PRIVATE lob_core benchmark::benchmark)
+add_executable(bench_spsc_queue bench/bench_spsc_queue.cpp)
+target_link_libraries(bench_spsc_queue PRIVATE lob_core benchmark::benchmark)
+
 
 add_executable(bench_book_impls bench/bench_book_impls.cpp)
 target_link_libraries(bench_book_impls PRIVATE lob_core benchmark::benchmark)
