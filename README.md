@@ -63,6 +63,9 @@ The `MatchingEngine` now manages a `std::unordered_map<InstrumentId, std::unique
 ## Step 3: Concurrency (SPSC Lock-free Queue) Completed
 Introduced a high-throughput lock-free Single-Producer Single-Consumer (SPSC) queue padded for zero false sharing across CPU cores (`include/lob/spsc_queue.hpp`). An `AsyncMatchingEngine` wrapper was built to spin up a background execution thread. Validated to safely transfer and execute > 4 Million concurrent `MarketEvent` actions per second across threads using `async_replay`.
 
+## Step 4: Real-world Market Data (ITCH-5.0 Parsing) Completed
+Implemented a zero-allocation, `#pragma pack(1)` NASDAQ ITCH 5.0 binary protocol parser (`include/lob/itch_parser.hpp`). Built an `itch_converter` tool that seamlessly transcodes standard real-world ITCH data (Add, Execute, Cancel, Delete, Replace) into our highly-optimized 32-byte `feed.bin` architecture. All data undergoes automatic big-endian to native-endian conversion utilizing fast CPU built-in bswaps.
+
 - **Micro-benchmarks** using Google Benchmark
 - **Latency statistics** including p50, p99, and p99.9
 - **Python analysis tooling** for latency distributions and PnL curves

@@ -41,6 +41,9 @@ target_link_libraries(replay PRIVATE lob_core)
 add_executable(backtest src/main_backtest.cpp)
 target_link_libraries(backtest PRIVATE lob_core)
 
+add_executable(itch_converter src/itch_converter.cpp)
+target_link_libraries(itch_converter PRIVATE lob_core)
+
 # Third-party dependencies via FetchContent
 include(FetchContent)
 
@@ -76,6 +79,9 @@ add_executable(test_spsc_queue tests/test_spsc_queue.cpp)
 target_link_libraries(test_spsc_queue PRIVATE lob_core GTest::gtest_main)
 add_test(NAME test_spsc_queue COMMAND test_spsc_queue)
 
+add_executable(test_itch_parser tests/test_itch_parser.cpp)
+target_link_libraries(test_itch_parser PRIVATE lob_core GTest::gtest_main)
+add_test(NAME test_itch_parser COMMAND test_itch_parser)
 
 add_executable(test_replay_determinism tests/test_replay_determinism.cpp)
 target_link_libraries(test_replay_determinism PRIVATE lob_core GTest::gtest_main)
